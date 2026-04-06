@@ -28,6 +28,7 @@ from .constants import (
     DEVICE_BOUNDS,
     DEVICE_LOOP_INNER,
     DEVICE_LOOP_OUTER,
+    LCD_ACTIVE_INSET,
     LCD_BACKGROUND,
     LCD_INSET,
     LCD_LINE,
@@ -123,6 +124,12 @@ class TamagotchiWindow(QWidget):
                 self._handle_button(button)
                 event.accept()
                 return
+
+            handle = self.windowHandle()
+            if handle is not None and QApplication.platformName() != "offscreen":
+                if handle.startSystemMove():
+                    event.accept()
+                    return
 
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
@@ -277,35 +284,39 @@ class TamagotchiWindow(QWidget):
 
     def _paint_lcd(self, painter: QPainter) -> None:
         screen_rect = self._map_rect(QRectF(*LCD_RECT))
-        content_scene = QRectF(
-            LCD_RECT[0] + LCD_INSET,
-            LCD_RECT[1] + LCD_INSET,
-            LCD_RECT[2] - (LCD_INSET * 2),
-            LCD_RECT[3] - (LCD_INSET * 2),
-        )
-        content_rect = self._map_rect(content_scene)
-
         screen_path = QPainterPath()
         radius = LCD_RADIUS * self._scale()
         screen_path.addRoundedRect(screen_rect, radius, radius)
 
+        active_scene = QRectF(
+            LCD_RECT[0] + LCD_ACTIVE_INSET[0],
+            LCD_RECT[1] + LCD_ACTIVE_INSET[1],
+            LCD_RECT[2] - LCD_ACTIVE_INSET[0] - LCD_ACTIVE_INSET[2],
+            LCD_RECT[3] - LCD_ACTIVE_INSET[1] - LCD_ACTIVE_INSET[3],
+        )
+        active_rect = self._map_rect(active_scene)
+        active_path = QPainterPath()
+        active_radius = max(6.0, (LCD_RADIUS - LCD_INSET) * self._scale())
+        active_path.addRoundedRect(active_rect, active_radius, active_radius)
+
         painter.save()
         painter.setClipPath(screen_path)
-        painter.fillPath(screen_path, QColor(*LCD_BACKGROUND))
-        self._paint_lcd_lines(painter, screen_rect)
-        self._paint_header(painter, content_rect)
-        self._paint_sprite(painter, content_rect)
+        painter.fillPath(screen_path, QColor(238, 234, 210, 54))
+        painter.fillPath(active_path, QColor(*LCD_BACKGROUND))
+        self._paint_lcd_lines(painter, active_rect)
+        self._paint_header(painter, active_rect)
+        self._paint_sprite(painter, active_rect)
 
         if self.show_status_until > now_local():
-            self._paint_status_panel(painter, content_rect)
+            self._paint_status_panel(painter, active_rect)
 
-        self._paint_footer(painter, content_rect)
+        self._paint_footer(painter, active_rect)
         painter.restore()
 
         painter.save()
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(92, 86, 66, 72), max(1, int(round(2 * self._scale())))))
-        painter.drawPath(screen_path)
+        painter.setPen(QPen(QColor(92, 86, 66, 56), max(1, int(round(2 * self._scale())))))
+        painter.drawPath(active_path)
         painter.restore()
 
     def _paint_lcd_lines(self, painter: QPainter, rect: QRectF) -> None:
