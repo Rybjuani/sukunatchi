@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
@@ -8,18 +10,24 @@ from PySide6.QtGui import (
     QKeyEvent,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
+    QRegion,
+    QTransform,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from .animations import AnimationClock, choose_animation
 from .assets import AssetCatalog
 from .constants import (
     APP_NAME,
-    BASE_SIZE,
     BUTTON_CENTERS,
     DEFAULT_WINDOW_SCALE,
+    DEVICE_BODY_RECT,
+    DEVICE_BOUNDS,
+    DEVICE_LOOP_INNER,
+    DEVICE_LOOP_OUTER,
     LCD_BACKGROUND,
     LCD_INSET,
     LCD_LINE,
@@ -44,19 +52,23 @@ class TamagotchiWindow(QWidget):
         self.store = store
         self.animation_clock = AnimationClock()
         self.menu_index = 0
-        self.menu_visible_until = now_local()
         self.show_status_until = now_local()
         self.pressed_button = ""
-        self._last_saved_message = ""
         self._drag_offset: QPoint | None = None
 
         self.setWindowTitle(APP_NAME)
-        compact_size = int(round(BASE_SIZE * DEFAULT_WINDOW_SCALE))
-        self.setFixedSize(compact_size, compact_size)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        bounds = QRectF(*DEVICE_BOUNDS)
+        self.resize(int(bounds.width() * DEFAULT_WINDOW_SCALE), int(bounds.height() * DEFAULT_WINDOW_SCALE))
+        self.setMinimumSize(int(bounds.width() * 0.48), int(bounds.height() * 0.48))
+
         self._install_timers()
         self._install_shortcuts()
         self.game.tick(now_local())
+        self._apply_window_shape()
 
     def _install_timers(self) -> None:
         self.logic_timer = QTimer(self)
@@ -68,15 +80,11 @@ class TamagotchiWindow(QWidget):
         self.paint_timer.start(120)
 
     def _install_shortcuts(self) -> None:
-        close_action = QAction(self)
-        close_action.setShortcut("Ctrl+Q")
-        close_action.triggered.connect(self.close)
-        self.addAction(close_action)
-
-        close_action_alt = QAction(self)
-        close_action_alt.setShortcut("Ctrl+W")
-        close_action_alt.triggered.connect(self.close)
-        self.addAction(close_action_alt)
+        for shortcut in ("Ctrl+Q", "Ctrl+W"):
+            action = QAction(self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(self.close)
+            self.addAction(action)
 
     def _on_logic_tick(self) -> None:
         if self.game.tick(now_local()):
@@ -90,6 +98,10 @@ class TamagotchiWindow(QWidget):
         self._save()
         return super().closeEvent(event)
 
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        self._apply_window_shape()
+        return super().resizeEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
         button = key_to_button(event.key())
         if button:
@@ -99,15 +111,23 @@ class TamagotchiWindow(QWidget):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.RightButton:
+            self.close()
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
-            button = button_at_point(QPointF(event.position()), scale=self._window_scale())
+            scene_point = self._widget_to_scene(event.position())
+            button = button_at_point(scene_point)
             if button:
                 self._handle_button(button)
                 event.accept()
                 return
+
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
@@ -132,110 +152,194 @@ class TamagotchiWindow(QWidget):
         if not self.game.state.alive and button == "B":
             self.game.perform("RESET", now)
             self.menu_index = 0
+            self.show_status_until = now - timedelta(seconds=1)
             self._save()
             self.update()
             return
 
         if button == "A":
             self.menu_index = (self.menu_index + 1) % len(MENU_ITEMS)
-            self.menu_visible_until = now.replace(microsecond=0)
-            self.menu_visible_until = self.menu_visible_until + self._seconds(5)
         elif button == "B":
             action = MENU_ITEMS[self.menu_index]
             if action == "STATUS":
-                self.show_status_until = now + self._seconds(6)
-                self.game.perform("STATUS", now)
-            else:
-                self.game.perform(action, now)
-            self.menu_visible_until = now + self._seconds(4)
+                self.show_status_until = now + timedelta(seconds=6)
+            self.game.perform(action, now)
             self._save()
         elif button == "C":
-            self.show_status_until = now - self._seconds(1)
-            self.menu_visible_until = now - self._seconds(1)
+            self.show_status_until = now - timedelta(seconds=1)
             self.game.state.message = ""
             self.game.state.message_until = ""
-            self._save()
+            self.update()
+            return
 
         self.update()
-
-    def _seconds(self, value: int):
-        from datetime import timedelta
-
-        return timedelta(seconds=value)
 
     def _clear_pressed_button(self) -> None:
         self.pressed_button = ""
         self.update()
+
+    def _bounds(self) -> QRectF:
+        return QRectF(*DEVICE_BOUNDS)
+
+    def _scale(self) -> float:
+        bounds = self._bounds()
+        return min(self.width() / bounds.width(), self.height() / bounds.height())
+
+    def _origin(self) -> QPointF:
+        bounds = self._bounds()
+        scale = self._scale()
+        width = bounds.width() * scale
+        height = bounds.height() * scale
+        return QPointF((self.width() - width) / 2, (self.height() - height) / 2)
+
+    def _map_rect(self, scene_rect: QRectF) -> QRectF:
+        bounds = self._bounds()
+        scale = self._scale()
+        origin = self._origin()
+        return QRectF(
+            origin.x() + ((scene_rect.left() - bounds.left()) * scale),
+            origin.y() + ((scene_rect.top() - bounds.top()) * scale),
+            scene_rect.width() * scale,
+            scene_rect.height() * scale,
+        )
+
+    def _map_point(self, scene_point: QPointF) -> QPointF:
+        bounds = self._bounds()
+        scale = self._scale()
+        origin = self._origin()
+        return QPointF(
+            origin.x() + ((scene_point.x() - bounds.left()) * scale),
+            origin.y() + ((scene_point.y() - bounds.top()) * scale),
+        )
+
+    def _widget_to_scene(self, point: QPointF) -> QPointF:
+        bounds = self._bounds()
+        scale = self._scale()
+        origin = self._origin()
+        return QPointF(
+            bounds.left() + ((point.x() - origin.x()) / scale),
+            bounds.top() + ((point.y() - origin.y()) / scale),
+        )
+
+    def _device_path_scene(self) -> QPainterPath:
+        body = QPainterPath()
+        body.addEllipse(QRectF(*DEVICE_BODY_RECT))
+
+        loop = QPainterPath()
+        loop.addEllipse(QRectF(*DEVICE_LOOP_OUTER))
+
+        hole = QPainterPath()
+        hole.addEllipse(QRectF(*DEVICE_LOOP_INNER))
+
+        return body.united(loop).subtracted(hole)
+
+    def _device_path_widget(self) -> QPainterPath:
+        scale = self._scale()
+        origin = self._origin()
+        bounds = self._bounds()
+
+        transform = QTransform()
+        transform.translate(origin.x(), origin.y())
+        transform.scale(scale, scale)
+        transform.translate(-bounds.left(), -bounds.top())
+        return transform.map(self._device_path_scene())
+
+    def _apply_window_shape(self) -> None:
+        if QApplication.platformName() == "offscreen":
+            self.clearMask()
+            return
+        path = self._device_path_widget()
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def _font(self, pixel_size: float, bold: bool = True) -> QFont:
+        font = QFont("DejaVu Sans Mono")
+        font.setBold(bold)
+        font.setPixelSize(max(8, int(round(pixel_size * self._scale()))))
+        font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
+        return font
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, False)
-        scale = self._window_scale()
-        painter.scale(scale, scale)
-        painter.drawPixmap(0, 0, self.assets.casing)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+        device_rect = self._map_rect(QRectF(*DEVICE_BOUNDS))
+        painter.save()
+        painter.setClipPath(self._device_path_widget())
+        painter.drawPixmap(device_rect, self.assets.casing, QRectF(*DEVICE_BOUNDS))
         self._paint_lcd(painter)
         self._paint_button_feedback(painter)
-
-    def _window_scale(self) -> float:
-        return self.width() / BASE_SIZE
-
-    def _paint_lcd(self, painter: QPainter) -> None:
-        x, y, width, height = LCD_RECT
-        screen_rect = QRectF(x, y, width, height)
-        content_rect = screen_rect.adjusted(LCD_INSET, LCD_INSET, -LCD_INSET, -LCD_INSET)
-
-        painter.save()
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(*LCD_BACKGROUND))
-        painter.drawRoundedRect(content_rect, LCD_RADIUS, LCD_RADIUS)
-        self._paint_lcd_lines(painter, content_rect)
         painter.restore()
 
+    def _paint_lcd(self, painter: QPainter) -> None:
+        screen_rect = self._map_rect(QRectF(*LCD_RECT))
+        content_scene = QRectF(
+            LCD_RECT[0] + LCD_INSET,
+            LCD_RECT[1] + LCD_INSET,
+            LCD_RECT[2] - (LCD_INSET * 2),
+            LCD_RECT[3] - (LCD_INSET * 2),
+        )
+        content_rect = self._map_rect(content_scene)
+
+        screen_path = QPainterPath()
+        radius = LCD_RADIUS * self._scale()
+        screen_path.addRoundedRect(screen_rect, radius, radius)
+
+        painter.save()
+        painter.setClipPath(screen_path)
+        painter.fillPath(screen_path, QColor(*LCD_BACKGROUND))
+        self._paint_lcd_lines(painter, screen_rect)
         self._paint_header(painter, content_rect)
         self._paint_sprite(painter, content_rect)
-        self._paint_footer(painter, content_rect)
 
         if self.show_status_until > now_local():
             self._paint_status_panel(painter, content_rect)
 
+        self._paint_footer(painter, content_rect)
+        painter.restore()
+
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(92, 86, 66, 72), max(1, int(round(2 * self._scale())))))
+        painter.drawPath(screen_path)
+        painter.restore()
+
     def _paint_lcd_lines(self, painter: QPainter, rect: QRectF) -> None:
         painter.save()
-        painter.setPen(QPen(QColor(*LCD_LINE), 1))
-        y = int(rect.top()) + 1
+        painter.setPen(QPen(QColor(*LCD_LINE), max(1, int(round(self._scale())))))
+        step = max(3, int(round(4 * self._scale())))
+        y = int(rect.top()) + step
         while y < int(rect.bottom()):
-            painter.drawLine(int(rect.left()) + 4, y, int(rect.right()) - 4, y)
-            y += 4
+            painter.drawLine(int(rect.left()) + 5, y, int(rect.right()) - 5, y)
+            y += step
         painter.restore()
 
     def _paint_header(self, painter: QPainter, rect: QRectF) -> None:
         painter.save()
         painter.setPen(QColor(*LCD_TEXT))
-
-        title_font = QFont("DejaVu Sans Mono", 16, QFont.Weight.Bold)
-        title_font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
-        sub_font = QFont("DejaVu Sans Mono", 15, QFont.Weight.Bold)
-        sub_font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
-
-        painter.setFont(title_font)
+        painter.setFont(self._font(24))
         painter.drawText(
-            QRectF(rect.left() + 12, rect.top() + 8, rect.width() - 24, 28),
+            QRectF(rect.left(), rect.top() + (4 * self._scale()), rect.width(), 30 * self._scale()),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "SAKUNA",
         )
 
-        painter.setFont(sub_font)
-        line = "GAME OVER" if not self.game.state.alive else f"CE Level: {self.game.state.level:02d}"
+        painter.setFont(self._font(22))
+        line = "GAME OVER" if not self.game.state.alive else f"LEVEL {self.game.state.level:02d}"
+        if self.game.state.stage == "egg" and self.game.state.alive:
+            line = "EGG"
         painter.drawText(
-            QRectF(rect.left() + 12, rect.top() + 34, rect.width() - 24, 28),
+            QRectF(rect.left(), rect.top() + (34 * self._scale()), rect.width(), 28 * self._scale()),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             line,
         )
         painter.restore()
 
     def _paint_sprite(self, painter: QPainter, rect: QRectF) -> None:
-        now = now_local()
         decision = choose_animation(self.game.state, self.game.state.transient_animation or None)
         frames = self.assets.frames(decision.name)
         frame_index = self.animation_clock.frame_index(
@@ -246,23 +350,33 @@ class TamagotchiWindow(QWidget):
         )
         sprite = frames[frame_index]
 
-        target_area = QRectF(rect.left() + 26, rect.top() + 82, rect.width() - 52, rect.height() - 136)
+        target_area = QRectF(
+            rect.left() + (18 * self._scale()),
+            rect.top() + (82 * self._scale()),
+            rect.width() - (36 * self._scale()),
+            rect.height() - (156 * self._scale()),
+        )
         scaled = self._scale_nearest(sprite, target_area)
-        x = target_area.center().x() - scaled.width() / 2
+        x = target_area.center().x() - (scaled.width() / 2)
         y = target_area.bottom() - scaled.height()
-        painter.drawPixmap(int(x), int(y), scaled)
+        painter.drawPixmap(int(round(x)), int(round(y)), scaled)
 
         if self.game.state.poop_count > 1 and decision.name not in {"clean", "dead"}:
             self._paint_extra_poop(painter, target_area)
 
     def _paint_extra_poop(self, painter: QPainter, rect: QRectF) -> None:
         icon = self.assets.icons["poop"]
-        size = icon.size()
-        scaled = icon.scaled(size.width() * 2, size.height() * 2, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+        base_scale = max(1, int(round(self._scale() * 2)))
+        scaled = icon.scaled(
+            icon.width() * base_scale,
+            icon.height() * base_scale,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
         for index in range(1, self.game.state.poop_count):
-            px = rect.left() + 20 + ((index - 1) * (scaled.width() + 6))
-            py = rect.bottom() - scaled.height() - 6
-            painter.drawPixmap(int(px), int(py), scaled)
+            px = rect.left() + (14 * self._scale()) + ((index - 1) * (scaled.width() + (6 * self._scale())))
+            py = rect.bottom() - scaled.height() - (4 * self._scale())
+            painter.drawPixmap(int(round(px)), int(round(py)), scaled)
 
     def _scale_nearest(self, sprite: QPixmap, rect: QRectF) -> QPixmap:
         max_scale_x = max(1, int(rect.width() // max(1, sprite.width())))
@@ -277,57 +391,64 @@ class TamagotchiWindow(QWidget):
 
     def _paint_footer(self, painter: QPainter, rect: QRectF) -> None:
         painter.save()
-        painter.setPen(QColor(*LCD_TEXT))
-        font = QFont("DejaVu Sans Mono", 13, QFont.Weight.Bold)
-        font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
-        painter.setFont(font)
+        footer_rect = QRectF(
+            rect.left() + (16 * self._scale()),
+            rect.bottom() - (36 * self._scale()),
+            rect.width() - (32 * self._scale()),
+            28 * self._scale(),
+        )
 
-        footer_text = ""
-        current = now_local()
         if not self.game.state.alive:
-            footer_text = "B: NEW EGG"
+            footer_text = "B NEW EGG"
         elif self.game.state.message:
             footer_text = self.game.state.message
-        elif self.menu_visible_until > current:
-            footer_text = f">{MENU_ITEMS[self.menu_index]}"
         elif self.game.state.attention:
-            footer_text = f"CALL: {self.game.state.attention_reason}"
+            footer_text = f"CALL {self.game.state.attention_reason}"
+        else:
+            footer_text = MENU_ITEMS[self.menu_index]
 
-        if footer_text:
-            footer_rect = QRectF(rect.left() + 44, rect.bottom() - 34, rect.width() - 88, 24)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(*LCD_MESSAGE))
-            painter.drawRoundedRect(footer_rect, 10, 10)
-            painter.setPen(QColor(*LCD_TEXT))
-            painter.drawText(footer_rect, Qt.AlignmentFlag.AlignCenter, footer_text)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(*LCD_MESSAGE))
+        painter.drawRoundedRect(footer_rect, 10 * self._scale(), 10 * self._scale())
+        painter.setPen(QColor(*LCD_TEXT))
+        painter.setFont(self._font(18))
+        painter.drawText(footer_rect, Qt.AlignmentFlag.AlignCenter, footer_text)
         painter.restore()
 
     def _paint_status_panel(self, painter: QPainter, rect: QRectF) -> None:
         painter.save()
-        panel_rect = QRectF(rect.left() + 24, rect.top() + 84, rect.width() - 48, 96)
-        painter.setPen(QPen(QColor(*LCD_PANEL_BORDER), 1))
+        panel_rect = QRectF(
+            rect.left() + (12 * self._scale()),
+            rect.top() + (90 * self._scale()),
+            rect.width() - (24 * self._scale()),
+            104 * self._scale(),
+        )
+        painter.setPen(QPen(QColor(*LCD_PANEL_BORDER), max(1, int(round(self._scale())))))
         painter.setBrush(QColor(*LCD_PANEL))
-        painter.drawRoundedRect(panel_rect, 12, 12)
+        painter.drawRoundedRect(panel_rect, 10 * self._scale(), 10 * self._scale())
         painter.setPen(QColor(*LCD_TEXT))
-        font = QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold)
-        font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
-        painter.setFont(font)
-        row_y = panel_rect.top() + 18
+        painter.setFont(self._font(16))
+
+        row_y = panel_rect.top() + (17 * self._scale())
         for row in self.game.status_rows():
             painter.drawText(
-                QRectF(panel_rect.left() + 12, row_y, panel_rect.width() - 24, 16),
+                QRectF(panel_rect.left() + (12 * self._scale()), row_y, panel_rect.width(), 18 * self._scale()),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 row,
             )
-            row_y += 20
+            row_y += 21 * self._scale()
         painter.restore()
 
     def _paint_button_feedback(self, painter: QPainter) -> None:
         if not self.pressed_button:
             return
-        center = BUTTON_CENTERS[self.pressed_button]
+
+        center_scene = BUTTON_CENTERS[self.pressed_button]
+        center = self._map_point(QPointF(*center_scene))
+        radius = 28 * self._scale()
+
         painter.save()
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(120, 64, 82, 46))
-        painter.drawEllipse(QPointF(*center), 42, 42)
+        painter.drawEllipse(center, radius, radius)
         painter.restore()

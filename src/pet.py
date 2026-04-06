@@ -200,11 +200,12 @@ class PetGame:
 
     def status_rows(self) -> tuple[str, ...]:
         hearts = lambda value: max(0, min(4, round(value / 25)))
+        health_state = "SICK" if self.state.sick else "OK"
         return (
-            f"HUN {hearts(self.state.hunger)}/4   JOY {hearts(self.state.happiness)}/4",
-            f"HLT {hearts(self.state.health)}/4   DIS {hearts(self.state.discipline)}/4",
-            f"POOP {self.state.poop_count}     AGE {self.state.display_age}",
-            f"LV  {self.state.level:02d}     STG {self.state.stage.upper()}",
+            f"HUNGER {hearts(self.state.hunger)}/4",
+            f"HAPPY  {hearts(self.state.happiness)}/4",
+            f"HEALTH {health_state}  POOP {self.state.poop_count}",
+            f"AGE {self.state.display_age}  LV {self.state.level:02d}",
         )
 
     def _advance_one_minute(self, current: datetime) -> None:
@@ -324,6 +325,8 @@ class PetGame:
         )
 
     def _is_sleep_time(self, current: datetime) -> bool:
+        if self.state.stage in {"egg", "baby"} or self.state.age_minutes < 20:
+            return False
         return current.hour >= 22 or current.hour < 8
 
     def _refresh_attention(self, current: datetime) -> None:
@@ -338,11 +341,11 @@ class PetGame:
         elif self.state.asleep and not self.state.lights_off:
             reason = "LIGHT"
         elif self.state.poop_count > 0:
-            reason = "DIRTY"
+            reason = "POOP"
         elif self.state.hunger <= 30:
-            reason = "HUNGRY"
+            reason = "HUNGER"
         elif self.state.happiness <= 30:
-            reason = "BORED"
+            reason = "HAPPY"
         elif self.state.pending_discipline:
             reason = "DISC"
 

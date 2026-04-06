@@ -35,10 +35,12 @@ sukunatchi
 ## Controles
 
 - `A` o `Left`: navegar acciones
+- `Tab`: navegar acciones
 - `B` o `Enter` o `Space`: confirmar / ejecutar
 - `C` o `Backspace` o `Esc`: cancelar / volver
 - Click en los botones fisicos `A`, `B`, `C`: igual que el teclado
 - Arrastrar con mouse sobre la carcasa: mover la ventana
+- Click derecho sobre la app: cerrar
 - `Ctrl+Q` o `Ctrl+W`: cerrar rapido
 
 ## Menu
@@ -55,6 +57,7 @@ sukunatchi
 ## Persistencia
 
 El estado se guarda automaticamente en `save/state.json`.
+Si no existe save previo compatible, la partida comienza desde huevo.
 
 ## Screenshot offscreen
 
