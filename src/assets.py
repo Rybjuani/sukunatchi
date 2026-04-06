@@ -3,11 +3,21 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from PIL.ImageQt import ImageQt
 from PySide6.QtGui import QPixmap
 
-from .constants import CARCASA_PATH, SPRITE_SHEET_PATH
+from .constants import (
+    CARCASA_PATH,
+    DEVICE_BODY_RECT,
+    DEVICE_BOUNDS,
+    DEVICE_LOOP_INNER,
+    DEVICE_LOOP_OUTER,
+    LCD_ACTIVE_INSET,
+    LCD_RADIUS,
+    LCD_RECT,
+    SPRITE_SHEET_PATH,
+)
 
 
 ForegroundThreshold = 68
@@ -49,7 +59,7 @@ ANIMATION_SPECS: dict[str, AnimationSpec] = {
 
 class AssetCatalog:
     def __init__(self) -> None:
-        self.casing = QPixmap(str(CARCASA_PATH))
+        self.casing = self._build_device_shell()
         self.sheet = Image.open(SPRITE_SHEET_PATH).convert("RGB")
         self.sheet_bg = self.sheet.getpixel((0, 0))
         self.animations: dict[str, list[QPixmap]] = {}
@@ -150,7 +160,10 @@ class AssetCatalog:
                 box = (min_x, min_y, max_x + 1, max_y + 1)
                 component = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (0, 0, 0, 0))
                 for cx, cy in cells:
-                    component.putpixel((cx - box[0], cy - box[1]), (*pixels[cx, cy], 255))
+                    component.putpixel(
+                        (cx - box[0], cy - box[1]),
+                        self._lcd_sprite_pixel(pixels[cx, cy]),
+                    )
                 components.append(Component(area=len(cells), box=box, image=component))
 
         components.sort(key=lambda item: item.box[0])
@@ -164,6 +177,72 @@ class AssetCatalog:
     def _is_foreground(self, pixel: tuple[int, int, int]) -> bool:
         distance = sum(abs(channel - base) for channel, base in zip(pixel, self.sheet_bg))
         return distance >= ForegroundThreshold
+
+    def _lcd_sprite_pixel(self, pixel: tuple[int, int, int]) -> tuple[int, int, int, int]:
+        luminance = int((pixel[0] * 0.299) + (pixel[1] * 0.587) + (pixel[2] * 0.114))
+        if luminance >= 180:
+            return (0, 0, 0, 0)
+        if luminance <= 92:
+            return (16, 16, 16, 255)
+        if luminance <= 128:
+            return (20, 20, 20, 210)
+        if luminance <= 160:
+            return (28, 28, 28, 118)
+        return (0, 0, 0, 0)
+
+    def _build_device_shell(self) -> QPixmap:
+        source = Image.open(CARCASA_PATH).convert("RGBA")
+        bx, by, bw, bh = DEVICE_BOUNDS
+        crop = source.crop((bx, by, bx + bw, by + bh))
+        width, height = crop.size
+
+        alpha = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(alpha)
+
+        body_rect = (
+            DEVICE_BODY_RECT[0] - bx,
+            DEVICE_BODY_RECT[1] - by,
+            DEVICE_BODY_RECT[0] - bx + DEVICE_BODY_RECT[2],
+            DEVICE_BODY_RECT[1] - by + DEVICE_BODY_RECT[3],
+        )
+        loop_outer = (
+            DEVICE_LOOP_OUTER[0] - bx,
+            DEVICE_LOOP_OUTER[1] - by,
+            DEVICE_LOOP_OUTER[0] - bx + DEVICE_LOOP_OUTER[2],
+            DEVICE_LOOP_OUTER[1] - by + DEVICE_LOOP_OUTER[3],
+        )
+        loop_inner = (
+            DEVICE_LOOP_INNER[0] - bx,
+            DEVICE_LOOP_INNER[1] - by,
+            DEVICE_LOOP_INNER[0] - bx + DEVICE_LOOP_INNER[2],
+            DEVICE_LOOP_INNER[1] - by + DEVICE_LOOP_INNER[3],
+        )
+
+        draw.ellipse(body_rect, fill=255)
+        draw.ellipse(loop_outer, fill=255)
+        draw.ellipse(loop_inner, fill=0)
+
+        crop.putalpha(alpha)
+
+        active_rect = (
+            LCD_RECT[0] - bx + LCD_ACTIVE_INSET[0],
+            LCD_RECT[1] - by + LCD_ACTIVE_INSET[1],
+            LCD_RECT[0] - bx + LCD_RECT[2] - LCD_ACTIVE_INSET[2],
+            LCD_RECT[1] - by + LCD_RECT[3] - LCD_ACTIVE_INSET[3],
+        )
+        cutout_mask = Image.new("L", (width, height), 0)
+        cutout_draw = ImageDraw.Draw(cutout_mask)
+        cutout_draw.rounded_rectangle(
+            active_rect,
+            radius=max(1, LCD_RADIUS - 8),
+            fill=255,
+        )
+
+        cleared_alpha = crop.getchannel("A")
+        cleared_alpha.paste(0, mask=cutout_mask)
+        crop.putalpha(cleared_alpha)
+
+        return self._pixmap_from_pil(crop)
 
     def _pixmap_from_pil(self, image: Image.Image) -> QPixmap:
         return QPixmap.fromImage(ImageQt(image))

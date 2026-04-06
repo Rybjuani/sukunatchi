@@ -275,12 +275,9 @@ class TamagotchiWindow(QWidget):
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
         device_rect = self._map_rect(QRectF(*DEVICE_BOUNDS))
-        painter.save()
-        painter.setClipPath(self._device_path_widget())
-        painter.drawPixmap(device_rect, self.assets.casing, QRectF(*DEVICE_BOUNDS))
         self._paint_lcd(painter)
+        painter.drawPixmap(device_rect, self.assets.casing, QRectF(0, 0, self.assets.casing.width(), self.assets.casing.height()))
         self._paint_button_feedback(painter)
-        painter.restore()
 
     def _paint_lcd(self, painter: QPainter) -> None:
         screen_rect = self._map_rect(QRectF(*LCD_RECT))
