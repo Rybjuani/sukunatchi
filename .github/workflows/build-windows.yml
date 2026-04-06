@@ -1,0 +1,68 @@
+name: Build Windows Artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "requirements.txt"
+      - "sukunatchi.spec"
+      - "src/**"
+      - "carcaza.jpeg"
+      - "sukunas.jpg"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller>=6.6,<7"
+
+      - name: Build Windows Executable
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm sukunatchi.spec
+
+      - name: Prepare Artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item .\dist\Sukunatchi.exe .\artifact\Sukunatchi.exe
+          $hash = (Get-FileHash .\artifact\Sukunatchi.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content .\artifact\SHA256.txt "$hash  Sukunatchi.exe"
+          Set-Content .\artifact\README-Windows.txt @'
+          Sukunatchi for Windows
+          
+          File:
+          - Sukunatchi.exe
+          
+          Save path:
+          - %APPDATA%\Sukunatchi\save\state.json
+          
+          Run the executable directly.
+          '@
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sukunatchi-windows-exe
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 30

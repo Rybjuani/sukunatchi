@@ -64,3 +64,9 @@ Si no existe save previo compatible, la partida comienza desde huevo.
 ```bash
 QT_QPA_PLATFORM=offscreen python3 -m src.main --screenshot /tmp/sukunatchi.png --delay-ms 1200
 ```
+
+## Windows Artifact
+
+El workflow [build-windows.yml](/home/rybjuani/Escritorio/sukunatchi/.github/workflows/build-windows.yml) genera un `Sukunatchi.exe` único para Windows como artifact de GitHub Actions.
+
+En el ejecutable empaquetado, el save se guarda en `%APPDATA%\Sukunatchi\save\state.json`.

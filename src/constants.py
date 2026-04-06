@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 APP_NAME = "Sukunatchi"
@@ -8,9 +10,40 @@ DEFAULT_WINDOW_SCALE = 0.66
 SAVE_VERSION = 3
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-CARCASA_PATH = ROOT_DIR / "carcaza.jpeg"
-SPRITE_SHEET_PATH = ROOT_DIR / "sukunas.jpg"
-SAVE_PATH = ROOT_DIR / "save" / "state.json"
+
+
+def _resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent
+    return ROOT_DIR
+
+
+def _save_root() -> Path:
+    if not getattr(sys, "frozen", False):
+        return ROOT_DIR
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / APP_NAME
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        return Path(xdg_data) / APP_NAME
+
+    return Path.home() / ".local" / "share" / APP_NAME
+
+
+RESOURCE_ROOT = _resource_root()
+CARCASA_PATH = RESOURCE_ROOT / "carcaza.jpeg"
+SPRITE_SHEET_PATH = RESOURCE_ROOT / "sukunas.jpg"
+SAVE_PATH = _save_root() / "save" / "state.json"
 
 DEVICE_BOUNDS = (214, 34, 598, 884)
 DEVICE_BODY_RECT = (226, 144, 572, 760)
