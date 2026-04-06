@@ -1,4 +1,4 @@
-name: Build Windows Artifact
+name: Build Windows Installer
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
       - ".github/workflows/build-windows.yml"
       - "requirements.txt"
       - "sukunatchi.spec"
+      - "sukunatchi-installer.iss"
       - "src/**"
       - "carcaza.jpeg"
       - "sukunas.jpg"
@@ -40,29 +41,52 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm sukunatchi.spec
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "innosetup.exe"
+          Invoke-WebRequest https://jrsoftware.org/download.php/is.exe -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe not found at $iscc"
+          }
+          "ISCC_PATH=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Windows Installer
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+          & $env:ISCC_PATH "/DAppVersion=$version" "/DSourceExe=dist\Sukunatchi.exe" .\sukunatchi-installer.iss
+
       - name: Prepare Artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item .\dist\Sukunatchi.exe .\artifact\Sukunatchi.exe
-          $hash = (Get-FileHash .\artifact\Sukunatchi.exe -Algorithm SHA256).Hash.ToLower()
-          Set-Content .\artifact\SHA256.txt "$hash  Sukunatchi.exe"
+          Copy-Item .\installer-dist\Sukunatchi-Setup.exe .\artifact\Sukunatchi-Setup.exe
+          $hash = (Get-FileHash .\artifact\Sukunatchi-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content .\artifact\SHA256.txt "$hash  Sukunatchi-Setup.exe"
           Set-Content .\artifact\README-Windows.txt @'
           Sukunatchi for Windows
-          
+
           File:
-          - Sukunatchi.exe
-          
+          - Sukunatchi-Setup.exe
+
+          The installer:
+          - installs Sukunatchi in %LOCALAPPDATA%\Programs\Sukunatchi
+          - creates a desktop shortcut
+          - creates a Start menu shortcut
+
           Save path:
           - %APPDATA%\Sukunatchi\save\state.json
-          
-          Run the executable directly.
+
+          Run the installer and follow the wizard.
           '@
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sukunatchi-windows-exe
+          name: sukunatchi-windows-installer
           path: artifact/*
           if-no-files-found: error
           retention-days: 30

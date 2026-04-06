@@ -67,6 +67,12 @@ QT_QPA_PLATFORM=offscreen python3 -m src.main --screenshot /tmp/sukunatchi.png -
 
 ## Windows Artifact
 
-El workflow [build-windows.yml](/home/rybjuani/Escritorio/sukunatchi/.github/workflows/build-windows.yml) genera un `Sukunatchi.exe` único para Windows como artifact de GitHub Actions.
+El workflow [build-windows.yml](/home/rybjuani/Escritorio/sukunatchi/.github/workflows/build-windows.yml) genera un instalador `Sukunatchi-Setup.exe` para Windows como artifact de GitHub Actions.
+
+Ese instalador:
+
+- instala la app en `%LOCALAPPDATA%\Programs\Sukunatchi`
+- crea un acceso directo en el escritorio
+- crea un acceso directo en el menu Inicio
 
 En el ejecutable empaquetado, el save se guarda en `%APPDATA%\Sukunatchi\save\state.json`.
