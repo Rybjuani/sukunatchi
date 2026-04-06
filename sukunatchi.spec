@@ -3,7 +3,8 @@
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# PyInstaller expone SPECPATH mientras ejecuta el .spec; __file__ no es estable aqui.
+PROJECT_ROOT = Path(SPECPATH).resolve()
 
 datas = [
     (str(PROJECT_ROOT / "carcaza.jpeg"), "."),
