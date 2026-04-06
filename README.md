@@ -38,6 +38,8 @@ sukunatchi
 - `B` o `Enter` o `Space`: confirmar / ejecutar
 - `C` o `Backspace` o `Esc`: cancelar / volver
 - Click en los botones fisicos `A`, `B`, `C`: igual que el teclado
+- Arrastrar con mouse sobre la carcasa: mover la ventana
+- `Ctrl+Q` o `Ctrl+W`: cerrar rapido
 
 ## Menu
 

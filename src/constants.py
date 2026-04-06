@@ -4,6 +4,8 @@ from pathlib import Path
 
 APP_NAME = "Sukunatchi"
 BASE_SIZE = 1024
+DEFAULT_WINDOW_SCALE = 0.45
+SAVE_VERSION = 2
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CARCASA_PATH = ROOT_DIR / "carcaza.jpeg"

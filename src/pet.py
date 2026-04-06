@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from .constants import HATCH_MINUTES, MENU_ITEMS, STAGE_ORDER, STAGE_THRESHOLDS
+from .constants import HATCH_MINUTES, MENU_ITEMS, SAVE_VERSION, STAGE_ORDER, STAGE_THRESHOLDS
 
 
 def now_local() -> datetime:
@@ -27,6 +27,7 @@ def iso(dt: datetime) -> str:
 
 @dataclass
 class PetState:
+    save_version: int
     created_at: str
     last_update: str
     stage: str = "egg"
@@ -55,7 +56,7 @@ class PetState:
     @classmethod
     def fresh(cls, now: datetime | None = None) -> "PetState":
         current = now or now_local()
-        return cls(created_at=iso(current), last_update=iso(current))
+        return cls(save_version=SAVE_VERSION, created_at=iso(current), last_update=iso(current))
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "PetState":

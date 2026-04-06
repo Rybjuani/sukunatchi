@@ -7,7 +7,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .assets import AssetCatalog
-from .constants import APP_NAME, SAVE_PATH
+from .constants import APP_NAME, SAVE_PATH, SAVE_VERSION
 from .pet import PetGame, PetState
 from .storage import SaveStore
 from .ui import TamagotchiWindow
@@ -25,7 +25,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     store = SaveStore(SAVE_PATH)
     payload = store.load()
-    game = PetGame(PetState.from_dict(payload) if payload else None)
+    if payload and payload.get("save_version") == SAVE_VERSION:
+        state = PetState.from_dict(payload)
+    else:
+        state = None
+    game = PetGame(state)
     assets = AssetCatalog()
     window = TamagotchiWindow(assets, game, store)
     window.show()

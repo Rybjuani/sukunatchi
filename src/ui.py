@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -21,6 +19,7 @@ from .constants import (
     APP_NAME,
     BASE_SIZE,
     BUTTON_CENTERS,
+    DEFAULT_WINDOW_SCALE,
     LCD_BACKGROUND,
     LCD_INSET,
     LCD_LINE,
@@ -49,9 +48,11 @@ class TamagotchiWindow(QWidget):
         self.show_status_until = now_local()
         self.pressed_button = ""
         self._last_saved_message = ""
+        self._drag_offset: QPoint | None = None
 
         self.setWindowTitle(APP_NAME)
-        self.setFixedSize(BASE_SIZE, BASE_SIZE)
+        compact_size = int(round(BASE_SIZE * DEFAULT_WINDOW_SCALE))
+        self.setFixedSize(compact_size, compact_size)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._install_timers()
         self._install_shortcuts()
@@ -71,6 +72,11 @@ class TamagotchiWindow(QWidget):
         close_action.setShortcut("Ctrl+Q")
         close_action.triggered.connect(self.close)
         self.addAction(close_action)
+
+        close_action_alt = QAction(self)
+        close_action_alt.setShortcut("Ctrl+W")
+        close_action_alt.triggered.connect(self.close)
+        self.addAction(close_action_alt)
 
     def _on_logic_tick(self) -> None:
         if self.game.tick(now_local()):
@@ -93,12 +99,30 @@ class TamagotchiWindow(QWidget):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
-        button = button_at_point(QPointF(event.position()))
-        if button:
-            self._handle_button(button)
+        if event.button() == Qt.MouseButton.LeftButton:
+            button = button_at_point(QPointF(event.position()), scale=self._window_scale())
+            if button:
+                self._handle_button(button)
+                event.accept()
+                return
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def _handle_button(self, button: str) -> None:
         now = now_local()
@@ -148,10 +172,14 @@ class TamagotchiWindow(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, False)
-
-        painter.drawPixmap(self.rect(), self.assets.casing)
+        scale = self._window_scale()
+        painter.scale(scale, scale)
+        painter.drawPixmap(0, 0, self.assets.casing)
         self._paint_lcd(painter)
         self._paint_button_feedback(painter)
+
+    def _window_scale(self) -> float:
+        return self.width() / BASE_SIZE
 
     def _paint_lcd(self, painter: QPainter) -> None:
         x, y, width, height = LCD_RECT
