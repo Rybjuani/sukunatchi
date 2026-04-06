@@ -12,7 +12,7 @@ datas = [
 ]
 
 a = Analysis(
-    [str(PROJECT_ROOT / "src" / "main.py")],
+    [str(PROJECT_ROOT / "launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=datas,
